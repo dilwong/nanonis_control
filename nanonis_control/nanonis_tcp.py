@@ -1,8 +1,8 @@
-# The nanonis_programming_interface initializes a socket connection
-# to Nanonis, allowing the user to send commands to Nanonis through
-# a TCP/IP connection.
-
-# This module is compatible with Python 2 and Python 3.
+r'''
+The nanonis_programming_interface class initializes a socket connection
+to Nanonis, allowing the user to send commands to Nanonis through a
+TCP/IP connection.
+'''
 
 import socket
 import sys
@@ -45,8 +45,10 @@ elif python_major_version == 3:
 else:
     raise nanonisException('Unknown Python version')
 
-# Converts a ([A-Fa-f0-9]{2})* string to a sequence of bytes
 def decode_hex_from_string(input_string):
+    r'''
+    Converts a ([A-Fa-f0-9]{2})* string to a sequence of bytes
+    '''
     if python_major_version == 2:
         return input_string.decode('hex')
     elif python_major_version == 3:
@@ -54,8 +56,10 @@ def decode_hex_from_string(input_string):
     else:
         raise nanonisException('Unknown Python version')
 
-# Converts input_data to a sequence of bytes based on the datatype
 def to_binary(datatype, input_data):
+    r'''
+    Converts input_data to a sequence of bytes based on the datatype
+    '''
     if datatype == 'string':
         if python_major_version == 2:
             return bytes(input_data)
@@ -68,8 +72,10 @@ def to_binary(datatype, input_data):
     except KeyError:
         raise nanonisException('Unknown Data Type: ' + str(datatype))
 
-# Converts a sequence of bytes input_data into a Python string, int, or float
 def from_binary(datatype, input_data):
+    r'''
+    Converts a sequence of bytes input_data into a Python string, int, or float
+    '''
     if datatype == 'string':
         if python_major_version == 2:
             return input_data
@@ -82,8 +88,10 @@ def from_binary(datatype, input_data):
     except KeyError:
         raise nanonisException('Unknown Data Type ' + str(datatype))
 
-# Builds a 40 byte header with the Nanonis command name and body size in bytes
 def construct_header(command_name, body_size, send_response_back = True):
+    r'''
+    Builds a 40 byte header with the Nanonis command name and body size in bytes
+    '''
     cmd_name_bytes = to_binary('string', command_name)
     len_cmd_name_bytes = len(cmd_name_bytes)
     cmd_name_bytes += b'\0' * (32 - len_cmd_name_bytes) # Pad command name with 0x00 to 32 bytes
@@ -96,10 +104,12 @@ def construct_header(command_name, body_size, send_response_back = True):
              response_flag + b'\0\0'
     return header
 
-# Builds the sequence of bytes to send to Nanonis.
-# This function takes an odd number of arguments. The first argument is the command name.
-# The following arguments come in pairs: a string specifying the data type, the value of the data.
 def construct_command(command_name, *vargs):
+    r'''
+    Builds the sequence of bytes to send to Nanonis.
+    This function takes an odd number of arguments. The first argument is the command name.
+    The following arguments come in pairs: a string specifying the data type, the value of the data.
+    '''
     if len(vargs) % 2 != 0:
         raise nanonisException('Unbalanced number of arguments')
     body_size = 0
@@ -115,11 +125,51 @@ def construct_command(command_name, *vargs):
     return header + body
 
 class nanonis_programming_interface:
+
+    r'''
+    API for interacting with Nanonis.
+
+    Args:
+        IP : str
+            String containing IP address of computer running Nanonis.
+            Defaults to localhost '127.0.0.1'.
+        PORT: int
+            Port number for Nanonis.
+            Defaults to 6501.
+            Nanonis can only serve one client per port. If a port is being used, use 6502, 6503, or 6504.
+            If multiple clients connect to Nanonis, Nanonis will silently ignore the second or later connections.
     
-    # By default, nanonis_programming_interface connects to port 6501 on the localhost.
-    # Optional keyword IP is used to specify Nanonis software running on a different computer on the network.
-    # Nanonis can only serve one client per port. If a port is being used, use 6502, 6503, or 6504.
-    # If multiple clients connect to Nanonis, Nanonis will silently ignore the second or later connections.
+    Attributes:
+        BiasLimit : float (defaults to 10)
+            Maximum absolute value of the bias (V).
+        XScannerLimit : float (defaults to 1e-6)
+            Maximum absolute value of the scanner range in the x direction (m).
+        YScannerLimit : float (defaults to 1e-6)
+            Maximum absolute value of the scanner range in the y direction (m).
+        ZScannerLimit : float (defaults to 1e-7)
+            Maximum absolute value of the scanner range in the z direction (m).
+        LowerSetpointLimit : float (defaults to 0)
+            Lowest possible value of the setpoint (A).
+        UpperSetpointLimit : float (defaults to 1e-3)
+            Largest possible value of the setpoint (A).
+
+    Methods:
+        send(command_name, *vargs)
+        BiasSet(bias)
+        BiasGet()
+        TipXYSet(X, Y, wait = 1)
+        TipXYGet(wait = 1)
+        TipZSet(Z)
+        TipZGet()
+        FeedbackOnOffSet(feedbackStatus)
+        FeedbackOnOffGet()
+        Withdraw(wait = 1, timeout = -1)
+        Home()
+        SetpointSet(setpoint)
+        SetpointGet()
+        CurrentGet()
+    '''
+    
     def __init__(self, IP = '127.0.0.1', PORT = 6501):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((IP, PORT))
@@ -147,10 +197,15 @@ class nanonis_programming_interface:
         self.socket.sendall(message)
         return self.socket.recv(1024)
 
-    # Send a command to Nanonis.
-    # This method takes an odd number of arguments (not including self). The first argument is the command name.
-    # The following arguments come in pairs: a string specifying the data type, the value of the data.
     def send(self, command_name, *vargs):
+
+        r'''
+        Send a command to Nanonis.
+
+        This method takes an odd number of arguments (not including self). The first argument is the command name.
+        The following arguments come in pairs: a string specifying the data type, the value of the data.
+        '''
+
         try:
             # Acquire an atomic lock to prevent receiving a response that is unrelated to the request.
             # This is actually unnecessary right now since there are no features that use concurrency.
@@ -177,12 +232,21 @@ class nanonis_programming_interface:
                 'body':body \
                 }
     
-    # nanonis_programming_interface.parse_response takes as its first argument the return value of nanonis_programming_interface.send
-    # The following arguments are the data types of the information included in the body of the response message, not including the error message.
-    # This method returns a dictionary with the response information and error information.
-    # Note that the keys of the returned dictionary are strings of integers, not integers!
     @staticmethod
     def parse_response(response, *vargs):
+
+        r'''
+        Parse the response from Nanonis.
+
+        Args:
+            response: the return value of nanonis_programming_interface.send()
+            *vargs: the data types of the information included in the body of the response message, not including the error message.
+
+        Returns:
+            Dictionary with the response information and error information.
+            Note that the keys of the returned dictionary are strings of integers, not integers!
+        '''
+
         bytecursor = 0
         parsed = {}
         for idx, arg in enumerate(vargs):
@@ -203,8 +267,18 @@ class nanonis_programming_interface:
         
         return parsed
 
-    # Converts a number followed by an SI prefix into number * 10^{prefix exponent}
     def convert(self, input_data):
+
+        r'''
+        Converts a number followed by an SI prefix into number * 10^{prefix exponent}
+
+        Args:
+            input_data : str
+        
+        Returns:
+            Float
+        '''
+
         if self.regex is None:
             import re
             self.regex = re.compile(r'^(-)?([0-9.]+)\s*([A-Za-z]*)$')
@@ -223,8 +297,18 @@ class nanonis_programming_interface:
         except KeyError:
             raise nanonisException('Malformed number: SI prefix not recognized')
     
-    # Set the Bias (V)
     def BiasSet(self, bias):
+
+        r'''
+        Set the bias (V).
+
+        Args:
+            bias : float
+
+        Exceptions:
+            nanonisException occurs when the absolute value of the bias exceeds BiasLimit.
+        '''
+
         if type(bias) is str:
             bias_val = self.convert(bias)
         else:
@@ -234,14 +318,27 @@ class nanonis_programming_interface:
         else:
             raise nanonisException('Bias out of bounds')
     
-    # Get the Bias (V)
     def BiasGet(self):
+        r'''Get the bias (V).'''
         return self.parse_response(self.send('Bias.Get'), 'float32')['0']
 
-    # Set the X, Y tip coordinates (m)
-    # By default, this method blocks until the tip is done moving.
-    # Set wait = 0 to return immediately instead of blocking. Does not "scrub" wait parameter for invalid input.
+    # Does not "scrub" wait parameter for invalid input.
     def TipXYSet(self, X, Y, wait = 1):
+
+        r'''
+        Set the X, Y tip coordinates (m).
+
+        Args:
+            X : float
+            Y : float
+            wait : int
+                By default, this method blocks until the tip is done moving.
+                Set wait = 0 to return immediately instead of blocking.
+
+        Exceptions:
+            nanonisException occurs when the absolute value of X (Y) exceeds XScannerLimit (YScannerLimit).
+        '''
+
         if type(X) is str:
             X_val = self.convert(X)
         else:
@@ -256,13 +353,23 @@ class nanonis_programming_interface:
             raise nanonisException('Y out of bounds')
         self.send('FolMe.XYPosSet', 'float64', X_val, 'float64', Y_val, 'uint32', wait)
 
-    # Returns a dictionary containing the X, Y tip coordinates (m)
     def TipXYGet(self, wait = 1):
+        r'''Returns a dictionary containing the X, Y tip coordinates (m).'''
         parsedResponse = self.parse_response(self.send('FolMe.XYPosGet', 'uint32', wait), 'float64', 'float64')
         return {'X': parsedResponse['0'], 'Y': parsedResponse['1']}
 
-    # Set the Z tip height (m)
     def TipZSet(self, Z):
+
+        r'''
+        Set the Z tip height (m).
+
+        Args:
+            Z : float
+
+        Exceptions:
+            nanonisException occurs when the absolute value of Z exceeds ZScannerLimit.
+        '''
+
         if type(Z) is str:
             Z_val = self.convert(Z)
         else:
@@ -271,14 +378,25 @@ class nanonis_programming_interface:
             raise nanonisException('Z out of bounds')
         self.send('ZCtrl.ZPosSet', 'float32', Z_val)
 
-    # Get the Z tip height (m)
     def TipZGet(self):
+        r'''Get the Z tip height (m).'''
         parsedResponse = self.parse_response(self.send('ZCtrl.ZPosGet'), 'float32')['0']
         return parsedResponse
 
-    # Turn on/off the Z-controller feedback
-    # feedbackStatus can be 'On'/1 or 'Off'/0
     def FeedbackOnOffSet(self, feedbackStatus):
+
+        r'''
+        Turn on/off the Z-controller feedback.
+
+        Args:
+            feedbackStatus : Union[str, int]
+                'On' or 1 to turn on the SPM feedback (closed).
+                'Off' or 0 to turn off the SPM feedback (open).
+
+        Exceptions:
+            nanonisException occurs when feedbackStatus is not a valid input.
+        '''
+        
         if type(feedbackStatus) is str:
             if feedbackStatus.lower() == 'on':
                 ZCtrlStatus = 1
@@ -297,8 +415,8 @@ class nanonis_programming_interface:
             raise nanonisException('Feedback On or Off?')
         self.send('ZCtrl.OnOffSet', 'uint32', ZCtrlStatus)
 
-    # Returns the Z-controller feedback status as a string ('On' or 'Off')
     def FeedbackOnOffGet(self):
+        r'''Returns the Z-controller feedback status as a string ('On' or 'Off')'''
         parsedResponse = self.parse_response(self.send('ZCtrl.OnOffGet'), 'uint32')['0']
         if parsedResponse == 1:
             return 'On'
@@ -307,18 +425,31 @@ class nanonis_programming_interface:
         else:
             raise nanonisException('Unknown Feedback State')
 
-    # Turn off the feedback and fully withdraw the tip.
-    # By default, this method blocks until the tip is fully withdrawn or timeout (ms) is exceeded.
-    # timeout = -1 is infinite timeout.
     def Withdraw(self, wait = 1, timeout = -1):
+        r'''
+        Turn off the feedback and fully withdraw the tip.
+        
+        By default, this method blocks until the tip is fully withdrawn or timeout (ms) is exceeded.
+        timeout = -1 is infinite timeout.
+        '''
         self.send('ZCtrl.Withdraw', 'uint32', wait, 'int', timeout)
 
-    # Turn off feedback and move the tip to the Home position.
     def Home(self):
+        r'''Turn off feedback and move the tip to the Home position.'''
         self.send('ZCtrl.Home')
 
-    # Set the setpoint value (usually the setpoint current (A))
     def SetpointSet(self, setpoint):
+
+        r'''
+        Set the setpoint value (usually the setpoint current (A)).
+
+        Args:
+            setpoint : float
+
+        Exceptions:
+            nanonisException occurs when setpoint is less than LowerSetpointLimit or greater than UpperSetpointLimit.
+        '''
+
         if type(setpoint) is str:
             setpoint_val = self.convert(setpoint)
         else:
@@ -327,12 +458,12 @@ class nanonis_programming_interface:
             raise nanonisException('Setpoint out of bounds')
         self.send('ZCtrl.SetpntSet', 'float32', setpoint_val)
 
-    # Get the setpoint value (usually the setpoint current (A))
     def SetpointGet(self):
+        r'''Get the setpoint value (usually the setpoint current (A))'''
         parsedResponse = self.parse_response(self.send('ZCtrl.SetpntGet'), 'float32')['0']
         return parsedResponse
 
-    # Get the value of the current (A)
     def CurrentGet(self):
+        r'''Get the value of the current (A)'''
         parsedResponse = self.parse_response(self.send('Current.Get'), 'float32')['0']
         return parsedResponse

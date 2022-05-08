@@ -1,6 +1,6 @@
 # nanonis_control
 
-Software for controlling SPECS Nanonis. Tested for Nanonis V5 R10811, Python 2 and Python 3.
+Software for controlling SPECS Nanonis. Tested for Nanonis V5 R10811, Python 2.7 and Python 3.
 
 The main component of this package is nanonis_tcp.py, which contains a class named nanonis_programming_interface, which allows easy control of Nanonis through TCP/IP.
 
