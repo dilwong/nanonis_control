@@ -467,3 +467,29 @@ class nanonis_programming_interface:
         r'''Get the value of the current (A)'''
         parsedResponse = self.parse_response(self.send('Current.Get'), 'float32')['0']
         return parsedResponse
+    
+    def AtomTrackStatusGet(self, control):
+        r'''Get the status of the atom tracking control module.
+        
+        Args:
+            control : Union[str, int]
+            'Modulation' or 0 to check the status of the Modulation control (returns 0=off, 1=on)
+            'Controller' or 1 to check the status of the AtomTracking controller (returns 0=off, 1=on)
+            'Drift' or 2 to check the status of the drift measuement control (returns 0=off, 1=on)
+            
+        Exceptions:
+            nanonisException occurs when an invalid argument for control is supplied
+        '''
+        if type(control) is str:
+            if control.lower() == 'modulation':
+                control = 0
+            elif control.lower() == 'controller':
+                control = 1
+            elif control.lower() == 'drift':
+                control = 2
+            else:
+                raise nanonisException('Invalid atom tracking control')
+                
+        parsedResponse = self.parse_response(self.send('AtomTrack.StatusGet', 'uint16', control), 'uint16')['0']
+        return parsedResponse
+        
