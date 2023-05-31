@@ -492,4 +492,85 @@ class nanonis_programming_interface:
                 
         parsedResponse = self.parse_response(self.send('AtomTrack.StatusGet', 'uint16', control), 'uint16')['0']
         return parsedResponse
+    
+    def AtomTrackPropsGet(self):
+        r'''
+        Get the atom tracking parameters.
         
+        Args:
+            None
+            
+        Returns a dictionary containing the following:
+            iGain - float - gain of the atom tracking controller
+            freq - float - frequency of modulation (Hz)
+            amplitude - amplitude of the modulation (m)
+            phase - float - phase of the modulation (°)
+            soDelay - float - Switch off delay (s) Tracking position is averaged over this time before applying the position
+        '''
+        parsedResponse = self.parse_response(self.send('AtomTrack.PropsGet'), 'float32', 'float32', 'float32', 'float32', 'float32')
+        #Check to see if error has been returned
+        if parsedResponse['Error status']:
+            raise nanonisException('Error executing AtomTrackPropsGet')
+        else:
+            return {'iGain': parsedResponse['0'], 'freq': parsedResponse['1'], 'amplitude': parsedResponse['2'], 'phase': parsedResponse['3'], 'soDelay': parsedResponse['4']}
+    
+    def FolMePSOnOffSet(self, psStatus):
+        r'''Set the point and shoot option in follow me to on or off 
+        
+        Args:
+             psStatus: Union[str, int]
+            'Off' or 0 to turn point and shoot off
+            'On' or 1 to turn point and shoot on
+            
+        Exceptions:
+            nanonisException occurs when an invalid argument for psStatus is supplied'''
+            
+        if type(psStatus) is str:
+            if psStatus.lower() == 'on':
+                psStatus = 1
+            elif psStatus.lower() == 'off':
+                psStatus = 0
+            else:
+                raise nanonisException('Point and shoot On or Off?')
+        elif type(psStatus) is int:
+            if psStatus != 1 and psStatus!=0:
+                raise nanonisException('Invalid point and shoot status value, use 0 for off and 1 for on')
+        else:
+            raise nanonisException('Invalid point and shoot status argument, expected int or string')
+            
+        self.send('FolMe.PSOnOffSet', 'uint32', psStatus)
+        
+    def ZCtrlTiplLiftSet(self, tipLift):
+        r'''Set the value of the Z controller "tipLift" (the amount the tip moves in Z when Z controller is turned off) 
+        
+        Args:
+             tipLift: float
+
+            
+        Exceptions:
+            nanonisException occurs if the tipLift value set exceeds the Z scanner range'''
+            
+        if type(tipLift) is str:
+            tipLiftVal = self.convert(tipLift)
+        else:
+            tipLiftVal = float(tipLift)
+        if not (-self.ZScannerLimit <= tipLiftVal <= self.ZScannerLimit):
+            raise nanonisException('Z out of bounds')
+        self.send('ZCtrl.TipLiftSet', 'float32', tipLiftVal)
+        
+    # def PiezoDriftCompGet(self):
+    #     r''' Get the drift compensation parameters applied to the piezos. Returns a dictionary containing the following:
+    #         Status - bool - Indicates whether drift compensation is on or off
+    #         Vx - float - the linear speed (m/s) applied to the X piezo to compensate the drift
+    #         Vy - float - the linear speed (m/s) applied to the Y piezo to compensate the drift
+    #         Vz - float - the linear speed (m/s) applied to the z piezo to compensate the drift
+    #         Xsat - bool - indicates if X drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
+    #         Ysat - bool - indicates if Y drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
+    #         Zsat - bool - indicates if Z drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
+    #         SatLimit - float - Drift saturation limit in % of full piezo range, applied to all axes
+    #     '''
+    #     parsedResponse = self.parse_response(self.send('Piezo.DriftCompGet'), 'uint32', 'float32', 'float32', 'float32', 'uint32', 'uint32', 'uint32', 'float32')
+    #     if parsedResponse['Error status']:
+    #         raise nanonisException('Error executing PiezoDriftCompGet')
+    #     else:
+    #         return {'Status': parsedResponse['0'], 'Vx': parsedResponse['1'], 'Vy': parsedResponse['2'], 'Vz': parsedResponse['3'], 'Xsat': bool(parsedResponse['4']), 'Ysat': bool(parsedResponse['5']), 'Zsat': bool(parsedResponse['6']), 'SatLim': parsedResponse['7']}
