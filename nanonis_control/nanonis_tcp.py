@@ -468,6 +468,44 @@ class nanonis_programming_interface:
         parsedResponse = self.parse_response(self.send('Current.Get'), 'float32')['0']
         return parsedResponse
     
+    def AtomTrackCtrlSet(self, control, status):
+        r'''Turns the selected Atom Tracking control (modulation, controller or drift measurement) on or off.
+        
+        Args:
+            control : str or int
+                'Modulation' or 0 to set the status of the Modulation control
+                'Controller' or 1 to set the status of the AtomTracking controller
+                'Drift' or 2 to set the status of the drift measuement control
+            on : int or bool - True or 1 to turn the selected control on, False or 0 to turn the selected control off
+            
+        Exceptions:
+            nanonisException occurs when an invalid argument for control is supplied
+        '''
+        #Convert control input to the necessary format
+        if type(control) is str:
+            if control.lower() == 'modulation':
+                control = 0
+            elif control.lower() == 'controller':
+                control = 1
+            elif control.lower() == 'drift':
+                control = 2
+            else:
+                raise nanonisException('Invalid atom tracking control')
+        
+        #Convert from string to int if necessary
+        if type(status) is str:
+            if status.lower() == 'on':
+                on = 1
+            elif status.lower() == 'off':
+                on = 0
+            else:
+                raise nanonisException('Feedback On or Off?')
+        #Send the command
+        if on:
+            self.send('AtomTrack.CtrlSet', 'uint16', control, 'uint16', 1)
+        else:
+            self.send('AtomTrack.CtrlSet', 'uint16', control, 'uint16', 0)
+    
     def AtomTrackStatusGet(self, control):
         r'''Get the status of the atom tracking control module.
         
@@ -558,19 +596,35 @@ class nanonis_programming_interface:
             raise nanonisException('Z out of bounds')
         self.send('ZCtrl.TipLiftSet', 'float32', tipLiftVal)
         
-    # def PiezoDriftCompGet(self):
-    #     r''' Get the drift compensation parameters applied to the piezos. Returns a dictionary containing the following:
-    #         Status - bool - Indicates whether drift compensation is on or off
-    #         Vx - float - the linear speed (m/s) applied to the X piezo to compensate the drift
-    #         Vy - float - the linear speed (m/s) applied to the Y piezo to compensate the drift
-    #         Vz - float - the linear speed (m/s) applied to the z piezo to compensate the drift
-    #         Xsat - bool - indicates if X drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
-    #         Ysat - bool - indicates if Y drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
-    #         Zsat - bool - indicates if Z drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
-    #         SatLimit - float - Drift saturation limit in % of full piezo range, applied to all axes
-    #     '''
-    #     parsedResponse = self.parse_response(self.send('Piezo.DriftCompGet'), 'uint32', 'float32', 'float32', 'float32', 'uint32', 'uint32', 'uint32', 'float32')
-    #     if parsedResponse['Error status']:
-    #         raise nanonisException('Error executing PiezoDriftCompGet')
-    #     else:
-    #         return {'Status': parsedResponse['0'], 'Vx': parsedResponse['1'], 'Vy': parsedResponse['2'], 'Vz': parsedResponse['3'], 'Xsat': bool(parsedResponse['4']), 'Ysat': bool(parsedResponse['5']), 'Zsat': bool(parsedResponse['6']), 'SatLim': parsedResponse['7']}
+    def PiezoDriftCompGet(self):
+        r''' Get the drift compensation parameters applied to the piezos. Returns a dictionary containing the following:
+            Status - bool - Indicates whether drift compensation is on or off
+            Vx - float - the linear speed (m/s) applied to the X piezo to compensate the drift
+            Vy - float - the linear speed (m/s) applied to the Y piezo to compensate the drift
+            Vz - float - the linear speed (m/s) applied to the z piezo to compensate the drift
+            Xsat - bool - indicates if X drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
+            Ysat - bool - indicates if Y drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
+            Zsat - bool - indicates if Z drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
+            SatLim - float - the drift saturation limit in percent of the full piezo range and it applies to all axes
+            Note, the saturation limit was added as a return argument in September 2022, this command will not work on older versions of Nanonis.
+        '''
+        parsedResponse = self.parse_response(self.send('Piezo.DriftCompGet'), 'uint32', 'float32', 'float32', 'float32', 'uint32', 'uint32', 'uint32', 'float32')
+        if parsedResponse['Error status']:
+            raise nanonisException('Error executing PiezoDriftCompGet')
+        else:
+            return {'Status': parsedResponse['0'], 'Vx': parsedResponse['1'], 'Vy': parsedResponse['2'], 'Vz': parsedResponse['3'], 'Xsat': bool(parsedResponse['4']), 'Ysat': bool(parsedResponse['5']), 'Zsat': bool(parsedResponse['6']), 'SatLim': bool(parsedResponse['7'])}
+        
+    def PiezoDriftCompSet(self, on, Vxyz, satLim=10):
+        r''' Set the drift compensation parameters applied to the piezos.
+            
+            Args:
+                 on : int - Activates or deactivates the drift compensation - (-1 = no change, 0 = off, 1 = on)
+                 Vxyz : [float, float, float] - list of the linear speeds (m/s) applied to the X, Y an Z piezos to compensate the drift
+                 satLim: float - the drift saturation limit in percent of the full piezo range and it applies to all axes - default 10%
+        '''
+        #Convert Vxyz values if input as strings
+        for Vn, i in enumerate(Vxyz):
+            if type(Vn) is str:
+                Vxyz[i] = self.convert(Vn)
+        
+        self.send('Piezo.DriftCompSet', 'int', on, 'float32', Vxyz[0], 'float32', Vxyz[1], 'float32', Vxyz[2], 'float32', satLim)
