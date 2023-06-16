@@ -8,19 +8,28 @@ import socket
 import sys
 import atexit
 import struct
+import numpy as np
 
 # Defines data types and their sizes in bytes
 datatype_dict = {'int':'>i', \
                  'uint16':'>H', \
                  'uint32':'>I', \
                  'float32':'>f', \
-                 'float64':'>d' \
+                 'float64':'>d', \
                 }
+    
 datasize_dict = {'int':4, \
                  'uint16':2, \
                  'uint32':4, \
                  'float32':4, \
                  'float64':8 \
+                }
+    
+datatype_py_dict = {'int':int, \
+                 'uint16':int, \
+                 'uint32':int, \
+                 'float32':float, \
+                 'float64':float, \
                 }
 
 si_prefix = {'':1.0, \
@@ -117,10 +126,42 @@ def construct_command(command_name, *vargs):
     datatype = ''
     for idx, arg in enumerate(vargs):
         if idx % 2 == 0:
-            datatype = arg
-            body_size += datasize_dict[datatype]
+            #Check to see if the input type is a 1D array
+            if arg.split("_")[0] == "1DArr":
+                arrayDims = 1
+                datatype = arg.split("_")[1] #Set the datatype to the second part of arg
+                if type(vargs[idx-1]) == int: #Look for the argument that specifies array length (should be argument before for first array)
+                    arrLen = vargs[idx-1] #Set the array length if arg two before current is int (if not will use previously set value)
+                    if arrLen != len(vargs[idx+1]):
+                        raise nanonisException('Array length ' + str(len(arg)) + ' but input array length is ' + str(arrLen))
+                if datatype == 'string': #Special case to deal with an array of string
+                    for string in vargs[idx+1]:
+                        body_size += len(string)+4 #Adds on the number of bytes equal to str length + 4 for the integer containing string length
+                else:
+                    body_size += datasize_dict[datatype]*arrLen
+                
+            else:
+                arrayDims = 0
+                datatype = arg
+                if datatype == 'string':
+                    if vargs[idx-1] == len(vargs[idx+1]):
+                        body_size += vargs[idx-1]
+                    else:
+                        raise nanonisException('String size is ' + str(len(arg)) + ' but input string length is ' + str(vargs[idx-1]))
+                else:
+                    body_size += datasize_dict[datatype]
         else:
-            body += to_binary(datatype, arg)
+            if arrayDims == 0 : #For data that is not in an array
+                body += to_binary(datatype, arg)
+            if arrayDims == 1:
+                if datatype == 'string': #Special case for string
+                    for string in arg:    
+                        body += to_binary('int', len(string)) #Add an integer with the string length
+                        body += to_binary(datatype, string) #Add the string to the body
+                else:
+                    for value in arg:
+                        body += to_binary(datatype, value) #Add the value to the command body
+            
     header = construct_header(command_name, body_size)
     return header + body
 
@@ -250,9 +291,39 @@ class nanonis_programming_interface:
         bytecursor = 0
         parsed = {}
         for idx, arg in enumerate(vargs):
-            bytesize = datasize_dict[arg]
-            parsed[str(idx)] = from_binary(arg, response['body'][bytecursor:bytecursor + bytesize])
-            bytecursor += bytesize
+            if arg.split("_")[0] == "1DArr": #Check to see if data type is a 1D array
+                #Search for the length of the array from previously parsed arguments (it will be the most recent integer argument)
+                for _i in range(len(parsed)):
+                    if type(parsed[str(idx-1-_i)]) == int:
+                        arrLen = parsed[str(idx-1-_i)]
+                        arrLenIdx = idx-_i
+                        break
+                        if idx-1-_i == 0:
+                            raise nanonisException('No array length found for 1D array')    
+                #array = np.zeros(arrLen) #Create a 1D array to put the values into
+                if arg.split("_")[1] == "string": #Special case if the data type is string, need to find the byte size of each element in the array                   
+                    array = np.zeros(arrLen, dtype=object)
+                    for _j in range(arrLen):
+                        bytesize = from_binary('int', response['body'][bytecursor:bytecursor + 4]) #Read in the integer that specifies the string length
+                        bytecursor += 4
+                        array[_j] = from_binary('string', response['body'][bytecursor:bytecursor + bytesize]) #Read the string for the current array element
+                        bytecursor += bytesize
+
+                else: #For non string data types
+                    datatype = arg.split("_")[1]
+                    bytesize = datasize_dict[datatype]
+                    array = np.zeros(arrLen, dtype=datatype_py_dict[datatype]) #Initialise an array with the correct datatype
+                    for _j in range(arrLen):
+                        array[_j] = from_binary(datatype, response['body'][bytecursor:bytecursor + bytesize])
+                        bytecursor += bytesize
+                parsed[str(idx)] = array
+            else:
+                if arg == 'string':
+                    bytesize = parsed[str(idx-1)]
+                else:
+                    bytesize = datasize_dict[arg]
+                    parsed[str(idx)] = from_binary(arg, response['body'][bytecursor:bytecursor + bytesize])
+                    bytecursor += bytesize
         parsed['Error status'] = from_binary('uint32', response['body'][bytecursor:bytecursor + 4])
         bytecursor += 4
         parsed['Error size'] = from_binary('int', response['body'][bytecursor:bytecursor + 4])
@@ -628,3 +699,43 @@ class nanonis_programming_interface:
                 Vxyz[i] = self.convert(Vn)
         
         self.send('Piezo.DriftCompSet', 'int', on, 'float32', Vxyz[0], 'float32', Vxyz[1], 'float32', Vxyz[2], 'float32', satLim)
+        
+    def ZSpectrPropsGet(self):
+        r'''
+        Get the Z Spectroscopy parameters.
+        
+        Args:
+            None
+            
+        Returns a dictionary containing the following:
+            backwardSweep - int - indicates if backward sweep is performed (1 for yes, 0 for no)
+            numPoints - int - number of points to acquire over the sweep range
+            channels - list - names of the acquired channels in the sweep
+            parameters - list - parameters of the sweep
+            fixedParameters - list - fixed parameters of the sweep
+            numSweeps - int - number of sweeps to measure and average
+            saveAll - int - indicates if data from individual sweeps is saved along with the average data (1 for yes, 0 for no)
+            
+        Raises:
+            nanonisException - if there is an error executing the command
+        '''
+        parsedResponse = self.parse_response(self.send('ZSpectr.PropsGet'), 'uint16', 'int', 'string', 'string', 'string', 'uint16', 'uint16')
+        
+        # Check if an error has been returned
+        if parsedResponse['Error status']:
+            raise nanonisException('Error executing ZSpectrPropsGet')
+        else:
+            # Parse the channels, parameters, and fixed parameters arrays
+            channels = parsedResponse['2'].split('\n')
+            parameters = parsedResponse['3'].split('\n')
+            fixedParameters = parsedResponse['4'].split('\n')
+            
+            return {
+                'backwardSweep': parsedResponse['0'],
+                'numPoints': parsedResponse['1'],
+                'channels': channels,
+                'parameters': parameters,
+                'fixedParameters': fixedParameters,
+                'numSweeps': parsedResponse['5'],
+                'saveAll': parsedResponse['6']
+            }
