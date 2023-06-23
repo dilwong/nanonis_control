@@ -236,7 +236,7 @@ class nanonis_programming_interface:
 
     def transmit(self, message):
         self.socket.sendall(message)
-        return self.socket.recv(1024)
+        return self.socket.recv(4096)
 
     def send(self, command_name, *vargs):
 
@@ -256,7 +256,6 @@ class nanonis_programming_interface:
             returned_command = from_binary('string', response[:32])
             body_size = from_binary('int', response[32:36])
             body = response[40:]
-
             # Check to make sure the body size actually matches the body size specified in the response header.
             if body_size != len(body):
                 errorMessage = 'Response body size error: ' + \
@@ -296,7 +295,6 @@ class nanonis_programming_interface:
                 for _i in range(len(parsed)):
                     if type(parsed[str(idx-1-_i)]) == int:
                         arrLen = parsed[str(idx-1-_i)]
-                        arrLenIdx = idx-_i
                         break
                         if idx-1-_i == 0:
                             raise nanonisException('No array length found for 1D array')    
@@ -317,7 +315,38 @@ class nanonis_programming_interface:
                         array[_j] = from_binary(datatype, response['body'][bytecursor:bytecursor + bytesize])
                         bytecursor += bytesize
                 parsed[str(idx)] = array
-            else:
+                
+            elif arg.split("_")[0] == "2DArr": #Check to see if data type is 2D array
+                #Search for the size of the array from previously parsed arguments (it will be the most recent two integer arguments)
+                for _i in range(len(parsed)):
+                    if type(parsed[str(idx-1-_i)]) == int:
+                        nCols = parsed[str(idx-1-_i)]
+                        if type(parsed[str(idx-2-_i)]) == int:
+                            nRows = parsed[str(idx-2-_i)]
+                        else:
+                            raise nanonisException('No number of row information found for 2D array')
+                        break
+                        if idx-1-_i == 0: #Raise exception if ints are not found
+                            raise nanonisException('No array size found for 2D array')    
+                if arg.split("_")[1] == "string": #Special case if the data type is string, need to find the byte size of each element in the array                   
+                    array = np.zeros([nRows, nCols], dtype=object) #Initialise an array
+                    for _i in range(nRows):
+                        for _j in range(nCols):
+                            bytesize = from_binary('int', response['body'][bytecursor:bytecursor + 4]) #Read in the integer that specifies the string length
+                            bytecursor += 4
+                            array[_i, _j] = from_binary('string', response['body'][bytecursor:bytecursor + bytesize]) #Read the string for the current array element
+                            bytecursor += bytesize
+                else: #For non string data types
+                    datatype = arg.split("_")[1]
+                    bytesize = datasize_dict[datatype]
+                    array = np.zeros([nRows, nCols], dtype=datatype_py_dict[datatype]) #Initialise an array with the correct datatype
+                    for _i in range(nRows):
+                        for _j in range(nCols):
+                            array[_i, _j] = from_binary(datatype, response['body'][bytecursor:bytecursor + bytesize])
+                            bytecursor += bytesize
+                parsed[str(idx)] = array
+            #For data not in an array
+            else: 
                 if arg == 'string':
                     bytesize = parsed[str(idx-1)]
                 else:
