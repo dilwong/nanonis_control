@@ -349,6 +349,8 @@ class nanonis_programming_interface:
             else: 
                 if arg == 'string':
                     bytesize = parsed[str(idx-1)]
+                    parsed[str(idx)] = from_binary(arg, response['body'][bytecursor:bytecursor + bytesize])
+                    bytecursor += bytesize
                 else:
                     bytesize = datasize_dict[arg]
                     parsed[str(idx)] = from_binary(arg, response['body'][bytecursor:bytecursor + bytesize])
@@ -363,7 +365,7 @@ class nanonis_programming_interface:
         
         # If the total number of bytes requested by the user does not match body_size minus the error size, raise an exception.
         if bytecursor != response['body_size']:
-            raise nanonisException('Response parse error: body_size = ' + str(response['body_size']))
+            raise nanonisException('Response parse error: body_size = ' + str(response['body_size']) + ' number of bytes expected is ' + str(bytecursor))
         
         return parsed
 
@@ -568,6 +570,85 @@ class nanonis_programming_interface:
         parsedResponse = self.parse_response(self.send('Current.Get'), 'float32')['0']
         return parsedResponse
     
+    def ScanFrameGet(self):
+        r'''Get the parameters for the scan frame.
+        
+        Args:
+            none
+        
+        Returns:
+            centre : [float, float] - x and y value of the centre of the scan frame (m)
+            size: [float, float] - width and height of the scan frame (m)
+            angle: float - angle of the scan frame (°)
+            
+        Exceptions:
+            none
+            '''
+        parsedResponse = self.parse_response(self.send('Scan.FrameGet'), 'float32', 'float32', 'float32', 'float32', 'float32')
+        #Convert output into the desired format and return
+        return {'centre': [parsedResponse['0'], parsedResponse['1']], 'size': [parsedResponse['2'], parsedResponse['3']], 'angle': parsedResponse['4']}
+    
+    def ScanAction(self, action, direction):
+        r'''Sets a scan action and associated direction (used for starting and stopping the scan etc.)
+        
+        Args:
+            action : str or int
+                'Start' or 0 to start the scan
+                'Stop' or 1 to stop the scan
+                'Pause' or 2 to pause the scan
+                'Resume' or 3 to resume the scan
+            direction : int or string - 
+                'Down' or 0 to set scan direction to down
+                'Up' or 1 to set scan direction up
+            
+        Exceptions:
+            nanonisException occurs when an invalid argument for action and/or direction is supplied'''
+        #Check the type of the action variable and convert to int if string
+        if isinstance(action, str):
+            if action.lower() == 'start':
+                action = 0
+            elif action.lower() == 'stop':
+                action = 1
+            elif action.lower() == 'pause':
+                action = 2
+            elif action.lower() == 'resume':
+                action = 3
+            else:
+                raise nanonisException('Invalid argument for action')
+        elif not isinstance(action, int) or action < 0 or action >=4:
+            raise nanonisException('Invalid argument for action')
+        #Check to see if the direction variable is valid and convert from string if necessary
+        if isinstance(direction, str):
+            if direction.lower() == 'down':
+                direction = 0
+            elif direction.lower() == 'up':
+                direction = 1
+            else:
+                raise nanonisException('Invalid argument for direction')
+        elif not isinstance(direction, int) or direction < 0 or direction >=2:
+            raise nanonisException('Invalid argument for direction')
+    
+        #Send the command
+        self.send('Scan.Action', 'uint16', action, 'uint32', direction)
+    
+    def ScanWaitEndOfScan(self, timeout=-1):
+        r'''Waits for the current scan to finish before returning
+        
+        Args:
+            timeout: int - Sets how many milliseconds this functions waits before timing out. Default value is 
+                    -1, which causes the code to wait indefinitely
+        
+        Returns a dictionary of the following parameters:
+            timeoutStatus - int - If 1, the function timed out, if 0, it didn't timeout'
+            filePath - string - returns the file path of the saved file. If no file was saved, string will be empty.
+            
+        Exceptions:
+            nanonisException occurs if an error is returned by the function
+        '''
+    
+        parsedResponse = self.parse_response(self.send('Scan.WaitEndOfScan', 'int', timeout), 'uint32', 'uint32', 'string')
+        return {'timeoutStatus': parsedResponse['0'], 'filePath': parsedResponse['2']}
+    
     def AtomTrackCtrlSet(self, control, status):
         r'''Turns the selected Atom Tracking control (modulation, controller or drift measurement) on or off.
         
@@ -581,6 +662,7 @@ class nanonis_programming_interface:
         Exceptions:
             nanonisException occurs when an invalid argument for control is supplied
         '''
+        
         #Convert control input to the necessary format
         if type(control) is str:
             if control.lower() == 'modulation':
@@ -609,7 +691,7 @@ class nanonis_programming_interface:
     def AtomTrackStatusGet(self, control):
         r'''Get the status of the atom tracking control module.
         
-        Args:
+        Return Args:
             control : Union[str, int]
             'Modulation' or 0 to check the status of the Modulation control (returns 0=off, 1=on)
             'Controller' or 1 to check the status of the AtomTracking controller (returns 0=off, 1=on)
@@ -678,7 +760,7 @@ class nanonis_programming_interface:
             
         self.send('FolMe.PSOnOffSet', 'uint32', psStatus)
         
-    def ZCtrlTiplLiftSet(self, tipLift):
+    def ZCtrlTipLiftSet(self, tipLift):
         r'''Set the value of the Z controller "tipLift" (the amount the tip moves in Z when Z controller is turned off) 
         
         Args:
@@ -719,7 +801,7 @@ class nanonis_programming_interface:
             
             Args:
                  on : int - Activates or deactivates the drift compensation - (-1 = no change, 0 = off, 1 = on)
-                 Vxyz : [float, float, float] - list of the linear speeds (m/s) applied to the X, Y an Z piezos to compensate the drift
+                 Vxyz : [float, float, float] - list or 1D numpy array of the linear speeds (m/s) applied to the X, Y an Z piezos to compensate the drift
                  satLim: float - the drift saturation limit in percent of the full piezo range and it applies to all axes - default 10%
         '''
         #Convert Vxyz values if input as strings
