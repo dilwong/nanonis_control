@@ -1,8 +1,9 @@
 # nanonis_control
 
-Software for controlling SPECS Nanonis. Tested for Nanonis V5 R10811, Python 2.7 and Python 3.
+Software for controlling SPECS Nanonis. Tested for Nanonis V5 R12671. Originally written to work with Python 2.7 and Python 3 but more recent functions have only been tested in python 3.
 
 The main component of this package is nanonis_tcp.py, which contains a class named nanonis_programming_interface, which allows easy control of Nanonis through TCP/IP.
+To find a full list of commands, download the documentation for the nanonis TCP interface from specs. 
 
 To use nanonis_programming_interface, create an instance:
 ```
@@ -16,9 +17,9 @@ nanonis.send('Bias.Set', 'float32', -1.0)
 
 Here, 'Bias.Set' is the name of the command, 'float32' is the data type, and -1.0 is the desired value.
 
-Or as a shortcut:
+Or as a shortcut, some commands have been built into nanonis_programming_interface as python functions e.g.:
 ```
-nanonis.BiasSet(-1.0)
+nanonis.BiasSet(-1.0) # Set the bias to -1.0 V
 nanonis.BiasGet() # Return the value of the bias
 ```
 
