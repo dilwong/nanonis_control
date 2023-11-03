@@ -850,3 +850,48 @@ class nanonis_programming_interface:
                 'numSweeps': parsedResponse['5'],
                 'saveAll': parsedResponse['6']
             }
+        
+    def SignalsNamesGet(self):
+        r'''
+        Get the list of channel names as a numpy array. Numpy array index corresponds to channel index in nanonis.
+
+        Returns
+        -------
+        numpy.1darray
+            Length 128 1D array containing the channel names. Index matches nanonis channel index.
+
+        '''
+        
+        parsedResponse = self.parse_response(self.send('Signals.NamesGet'), 'int', 'int', '1DArr_string')
+        return parsedResponse['2']
+        
+    
+    def SignalsValGet(self, signal, waitForNewest=True):
+        r'''
+        Get the value of a specified signal
+
+        Parameters
+        ----------
+        signal : int
+            Integer index of the signal. Channel indexes can be found by using the SignalsNamesGet function.
+        waitForNewest : Bool, optional
+            Selects whether the function returns the next available signal value or if it waits for a full 
+            period of new data. If False, this function returns a value 0 to Tap seconds after being called. 
+            If True, the function discard the first oversampled signal value received but returns the second 
+            value received. Thus, the function returns a value Tap to 2*Tap seconds after being called.
+            The default is True.
+
+        Returns
+        -------
+        Float containing the value of the signal in SI units.
+
+        '''
+        #Convert waitForNewest into an integer
+        if waitForNewest:
+            wait = 1
+        else:
+            wait = 0
+        parsedResponse = self.parse_response(self.send('Signals.ValGet', 'int', signal, 'uint32', wait), 'float32')
+        
+        return parsedResponse['0']
+            
