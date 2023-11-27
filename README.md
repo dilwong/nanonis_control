@@ -41,3 +41,6 @@ To close the connection:
 nanonis.close()
 ```
 Or just exit the Python interpreter.
+
+To further demonstrate how the interface works, a script "atom_tracking_script.py" has been included, which uses the atom tracking module in nanonis to record a series of images,
+correcting for drift after each one. 
