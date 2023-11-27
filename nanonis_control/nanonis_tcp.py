@@ -8,19 +8,28 @@ import socket
 import sys
 import atexit
 import struct
+import numpy as np
 
 # Defines data types and their sizes in bytes
 datatype_dict = {'int':'>i', \
                  'uint16':'>H', \
                  'uint32':'>I', \
                  'float32':'>f', \
-                 'float64':'>d' \
+                 'float64':'>d', \
                 }
+    
 datasize_dict = {'int':4, \
                  'uint16':2, \
                  'uint32':4, \
                  'float32':4, \
                  'float64':8 \
+                }
+    
+datatype_py_dict = {'int':int, \
+                 'uint16':int, \
+                 'uint32':int, \
+                 'float32':float, \
+                 'float64':float, \
                 }
 
 si_prefix = {'':1.0, \
@@ -117,10 +126,42 @@ def construct_command(command_name, *vargs):
     datatype = ''
     for idx, arg in enumerate(vargs):
         if idx % 2 == 0:
-            datatype = arg
-            body_size += datasize_dict[datatype]
+            #Check to see if the input type is a 1D array
+            if arg.split("_")[0] == "1DArr":
+                arrayDims = 1
+                datatype = arg.split("_")[1] #Set the datatype to the second part of arg
+                if type(vargs[idx-1]) == int: #Look for the argument that specifies array length (should be argument before for first array)
+                    arrLen = vargs[idx-1] #Set the array length if arg two before current is int (if not will use previously set value)
+                    if arrLen != len(vargs[idx+1]):
+                        raise nanonisException('Array length ' + str(len(arg)) + ' but input array length is ' + str(arrLen))
+                if datatype == 'string': #Special case to deal with an array of string
+                    for string in vargs[idx+1]:
+                        body_size += len(string)+4 #Adds on the number of bytes equal to str length + 4 for the integer containing string length
+                else:
+                    body_size += datasize_dict[datatype]*arrLen
+                
+            else:
+                arrayDims = 0
+                datatype = arg
+                if datatype == 'string':
+                    if vargs[idx-1] == len(vargs[idx+1]):
+                        body_size += vargs[idx-1]
+                    else:
+                        raise nanonisException('String size is ' + str(len(arg)) + ' but input string length is ' + str(vargs[idx-1]))
+                else:
+                    body_size += datasize_dict[datatype]
         else:
-            body += to_binary(datatype, arg)
+            if arrayDims == 0 : #For data that is not in an array
+                body += to_binary(datatype, arg)
+            if arrayDims == 1:
+                if datatype == 'string': #Special case for string
+                    for string in arg:    
+                        body += to_binary('int', len(string)) #Add an integer with the string length
+                        body += to_binary(datatype, string) #Add the string to the body
+                else:
+                    for value in arg:
+                        body += to_binary(datatype, value) #Add the value to the command body
+            
     header = construct_header(command_name, body_size)
     return header + body
 
@@ -195,7 +236,7 @@ class nanonis_programming_interface:
 
     def transmit(self, message):
         self.socket.sendall(message)
-        return self.socket.recv(1024)
+        return self.socket.recv(4096)
 
     def send(self, command_name, *vargs):
 
@@ -215,7 +256,6 @@ class nanonis_programming_interface:
             returned_command = from_binary('string', response[:32])
             body_size = from_binary('int', response[32:36])
             body = response[40:]
-
             # Check to make sure the body size actually matches the body size specified in the response header.
             if body_size != len(body):
                 errorMessage = 'Response body size error: ' + \
@@ -250,9 +290,71 @@ class nanonis_programming_interface:
         bytecursor = 0
         parsed = {}
         for idx, arg in enumerate(vargs):
-            bytesize = datasize_dict[arg]
-            parsed[str(idx)] = from_binary(arg, response['body'][bytecursor:bytecursor + bytesize])
-            bytecursor += bytesize
+            if arg.split("_")[0] == "1DArr": #Check to see if data type is a 1D array
+                #Search for the length of the array from previously parsed arguments (it will be the most recent integer argument)
+                for _i in range(len(parsed)):
+                    if type(parsed[str(idx-1-_i)]) == int:
+                        arrLen = parsed[str(idx-1-_i)]
+                        break
+                        if idx-1-_i == 0:
+                            raise nanonisException('No array length found for 1D array')    
+                #array = np.zeros(arrLen) #Create a 1D array to put the values into
+                if arg.split("_")[1] == "string": #Special case if the data type is string, need to find the byte size of each element in the array                   
+                    array = np.zeros(arrLen, dtype=object)
+                    for _j in range(arrLen):
+                        bytesize = from_binary('int', response['body'][bytecursor:bytecursor + 4]) #Read in the integer that specifies the string length
+                        bytecursor += 4
+                        array[_j] = from_binary('string', response['body'][bytecursor:bytecursor + bytesize]) #Read the string for the current array element
+                        bytecursor += bytesize
+
+                else: #For non string data types
+                    datatype = arg.split("_")[1]
+                    bytesize = datasize_dict[datatype]
+                    array = np.zeros(arrLen, dtype=datatype_py_dict[datatype]) #Initialise an array with the correct datatype
+                    for _j in range(arrLen):
+                        array[_j] = from_binary(datatype, response['body'][bytecursor:bytecursor + bytesize])
+                        bytecursor += bytesize
+                parsed[str(idx)] = array
+                
+            elif arg.split("_")[0] == "2DArr": #Check to see if data type is 2D array
+                #Search for the size of the array from previously parsed arguments (it will be the most recent two integer arguments)
+                for _i in range(len(parsed)):
+                    if type(parsed[str(idx-1-_i)]) == int:
+                        nCols = parsed[str(idx-1-_i)]
+                        if type(parsed[str(idx-2-_i)]) == int:
+                            nRows = parsed[str(idx-2-_i)]
+                        else:
+                            raise nanonisException('No number of row information found for 2D array')
+                        break
+                        if idx-1-_i == 0: #Raise exception if ints are not found
+                            raise nanonisException('No array size found for 2D array')    
+                if arg.split("_")[1] == "string": #Special case if the data type is string, need to find the byte size of each element in the array                   
+                    array = np.zeros([nRows, nCols], dtype=object) #Initialise an array
+                    for _i in range(nRows):
+                        for _j in range(nCols):
+                            bytesize = from_binary('int', response['body'][bytecursor:bytecursor + 4]) #Read in the integer that specifies the string length
+                            bytecursor += 4
+                            array[_i, _j] = from_binary('string', response['body'][bytecursor:bytecursor + bytesize]) #Read the string for the current array element
+                            bytecursor += bytesize
+                else: #For non string data types
+                    datatype = arg.split("_")[1]
+                    bytesize = datasize_dict[datatype]
+                    array = np.zeros([nRows, nCols], dtype=datatype_py_dict[datatype]) #Initialise an array with the correct datatype
+                    for _i in range(nRows):
+                        for _j in range(nCols):
+                            array[_i, _j] = from_binary(datatype, response['body'][bytecursor:bytecursor + bytesize])
+                            bytecursor += bytesize
+                parsed[str(idx)] = array
+            #For data not in an array
+            else: 
+                if arg == 'string':
+                    bytesize = parsed[str(idx-1)]
+                    parsed[str(idx)] = from_binary(arg, response['body'][bytecursor:bytecursor + bytesize])
+                    bytecursor += bytesize
+                else:
+                    bytesize = datasize_dict[arg]
+                    parsed[str(idx)] = from_binary(arg, response['body'][bytecursor:bytecursor + bytesize])
+                    bytecursor += bytesize
         parsed['Error status'] = from_binary('uint32', response['body'][bytecursor:bytecursor + 4])
         bytecursor += 4
         parsed['Error size'] = from_binary('int', response['body'][bytecursor:bytecursor + 4])
@@ -263,7 +365,7 @@ class nanonis_programming_interface:
         
         # If the total number of bytes requested by the user does not match body_size minus the error size, raise an exception.
         if bytecursor != response['body_size']:
-            raise nanonisException('Response parse error: body_size = ' + str(response['body_size']))
+            raise nanonisException('Response parse error: body_size = ' + str(response['body_size']) + ' number of bytes expected is ' + str(bytecursor))
         
         return parsed
 
@@ -467,3 +569,329 @@ class nanonis_programming_interface:
         r'''Get the value of the current (A)'''
         parsedResponse = self.parse_response(self.send('Current.Get'), 'float32')['0']
         return parsedResponse
+    
+    def ScanFrameGet(self):
+        r'''Get the parameters for the scan frame.
+        
+        Args:
+            none
+        
+        Returns:
+            centre : [float, float] - x and y value of the centre of the scan frame (m)
+            size: [float, float] - width and height of the scan frame (m)
+            angle: float - angle of the scan frame (°)
+            
+        Exceptions:
+            none
+            '''
+        parsedResponse = self.parse_response(self.send('Scan.FrameGet'), 'float32', 'float32', 'float32', 'float32', 'float32')
+        #Convert output into the desired format and return
+        return {'centre': [parsedResponse['0'], parsedResponse['1']], 'size': [parsedResponse['2'], parsedResponse['3']], 'angle': parsedResponse['4']}
+    
+    def ScanAction(self, action, direction):
+        r'''Sets a scan action and associated direction (used for starting and stopping the scan etc.)
+        
+        Args:
+            action : str or int
+                'Start' or 0 to start the scan
+                'Stop' or 1 to stop the scan
+                'Pause' or 2 to pause the scan
+                'Resume' or 3 to resume the scan
+            direction : int or string - 
+                'Down' or 0 to set scan direction to down
+                'Up' or 1 to set scan direction up
+            
+        Exceptions:
+            nanonisException occurs when an invalid argument for action and/or direction is supplied'''
+        #Check the type of the action variable and convert to int if string
+        if isinstance(action, str):
+            if action.lower() == 'start':
+                action = 0
+            elif action.lower() == 'stop':
+                action = 1
+            elif action.lower() == 'pause':
+                action = 2
+            elif action.lower() == 'resume':
+                action = 3
+            else:
+                raise nanonisException('Invalid argument for action')
+        elif not isinstance(action, int) or action < 0 or action >=4:
+            raise nanonisException('Invalid argument for action')
+        #Check to see if the direction variable is valid and convert from string if necessary
+        if isinstance(direction, str):
+            if direction.lower() == 'down':
+                direction = 0
+            elif direction.lower() == 'up':
+                direction = 1
+            else:
+                raise nanonisException('Invalid argument for direction')
+        elif not isinstance(direction, int) or direction < 0 or direction >=2:
+            raise nanonisException('Invalid argument for direction')
+    
+        #Send the command
+        self.send('Scan.Action', 'uint16', action, 'uint32', direction)
+    
+    def ScanWaitEndOfScan(self, timeout=-1):
+        r'''Waits for the current scan to finish before returning
+        
+        Args:
+            timeout: int - Sets how many milliseconds this functions waits before timing out. Default value is 
+                    -1, which causes the code to wait indefinitely
+        
+        Returns a dictionary of the following parameters:
+            timeoutStatus - int - If 1, the function timed out, if 0, it didn't timeout'
+            filePath - string - returns the file path of the saved file. If no file was saved, string will be empty.
+            
+        Exceptions:
+            nanonisException occurs if an error is returned by the function
+        '''
+    
+        parsedResponse = self.parse_response(self.send('Scan.WaitEndOfScan', 'int', timeout), 'uint32', 'uint32', 'string')
+        return {'timeoutStatus': parsedResponse['0'], 'filePath': parsedResponse['2']}
+    
+    def AtomTrackCtrlSet(self, control, status):
+        r'''Turns the selected Atom Tracking control (modulation, controller or drift measurement) on or off.
+        
+        Args:
+            control : str or int
+                'Modulation' or 0 to set the status of the Modulation control
+                'Controller' or 1 to set the status of the AtomTracking controller
+                'Drift' or 2 to set the status of the drift measuement control
+            on : int or bool - True or 1 to turn the selected control on, False or 0 to turn the selected control off
+            
+        Exceptions:
+            nanonisException occurs when an invalid argument for control is supplied
+        '''
+        
+        #Convert control input to the necessary format
+        if type(control) is str:
+            if control.lower() == 'modulation':
+                control = 0
+            elif control.lower() == 'controller':
+                control = 1
+            elif control.lower() == 'drift':
+                control = 2
+            else:
+                raise nanonisException('Invalid atom tracking control')
+        
+        #Convert from string to int if necessary
+        if type(status) is str:
+            if status.lower() == 'on':
+                on = 1
+            elif status.lower() == 'off':
+                on = 0
+            else:
+                raise nanonisException('Feedback On or Off?')
+        #Send the command
+        if on:
+            self.send('AtomTrack.CtrlSet', 'uint16', control, 'uint16', 1)
+        else:
+            self.send('AtomTrack.CtrlSet', 'uint16', control, 'uint16', 0)
+    
+    def AtomTrackStatusGet(self, control):
+        r'''Get the status of the atom tracking control module.
+        
+        Return Args:
+            control : Union[str, int]
+            'Modulation' or 0 to check the status of the Modulation control (returns 0=off, 1=on)
+            'Controller' or 1 to check the status of the AtomTracking controller (returns 0=off, 1=on)
+            'Drift' or 2 to check the status of the drift measuement control (returns 0=off, 1=on)
+            
+        Exceptions:
+            nanonisException occurs when an invalid argument for control is supplied
+        '''
+        if type(control) is str:
+            if control.lower() == 'modulation':
+                control = 0
+            elif control.lower() == 'controller':
+                control = 1
+            elif control.lower() == 'drift':
+                control = 2
+            else:
+                raise nanonisException('Invalid atom tracking control')
+                
+        parsedResponse = self.parse_response(self.send('AtomTrack.StatusGet', 'uint16', control), 'uint16')['0']
+        return parsedResponse
+    
+    def AtomTrackPropsGet(self):
+        r'''
+        Get the atom tracking parameters.
+        
+        Args:
+            None
+            
+        Returns a dictionary containing the following:
+            iGain - float - gain of the atom tracking controller
+            freq - float - frequency of modulation (Hz)
+            amplitude - amplitude of the modulation (m)
+            phase - float - phase of the modulation (°)
+            soDelay - float - Switch off delay (s) Tracking position is averaged over this time before applying the position
+        '''
+        parsedResponse = self.parse_response(self.send('AtomTrack.PropsGet'), 'float32', 'float32', 'float32', 'float32', 'float32')
+        #Check to see if error has been returned
+        if parsedResponse['Error status']:
+            raise nanonisException('Error executing AtomTrackPropsGet')
+        else:
+            return {'iGain': parsedResponse['0'], 'freq': parsedResponse['1'], 'amplitude': parsedResponse['2'], 'phase': parsedResponse['3'], 'soDelay': parsedResponse['4']}
+    
+    def FolMePSOnOffSet(self, psStatus):
+        r'''Set the point and shoot option in follow me to on or off 
+        
+        Args:
+             psStatus: Union[str, int]
+            'Off' or 0 to turn point and shoot off
+            'On' or 1 to turn point and shoot on
+            
+        Exceptions:
+            nanonisException occurs when an invalid argument for psStatus is supplied'''
+            
+        if type(psStatus) is str:
+            if psStatus.lower() == 'on':
+                psStatus = 1
+            elif psStatus.lower() == 'off':
+                psStatus = 0
+            else:
+                raise nanonisException('Point and shoot On or Off?')
+        elif type(psStatus) is int:
+            if psStatus != 1 and psStatus!=0:
+                raise nanonisException('Invalid point and shoot status value, use 0 for off and 1 for on')
+        else:
+            raise nanonisException('Invalid point and shoot status argument, expected int or string')
+            
+        self.send('FolMe.PSOnOffSet', 'uint32', psStatus)
+        
+    def ZCtrlTipLiftSet(self, tipLift):
+        r'''Set the value of the Z controller "tipLift" (the amount the tip moves in Z when Z controller is turned off) 
+        
+        Args:
+             tipLift: float
+
+            
+        Exceptions:
+            nanonisException occurs if the tipLift value set exceeds the Z scanner range'''
+            
+        if type(tipLift) is str:
+            tipLiftVal = self.convert(tipLift)
+        else:
+            tipLiftVal = float(tipLift)
+        if not (-self.ZScannerLimit <= tipLiftVal <= self.ZScannerLimit):
+            raise nanonisException('Z out of bounds')
+        self.send('ZCtrl.TipLiftSet', 'float32', tipLiftVal)
+        
+    def PiezoDriftCompGet(self):
+        r''' Get the drift compensation parameters applied to the piezos. Returns a dictionary containing the following:
+            Status - bool - Indicates whether drift compensation is on or off
+            Vx - float - the linear speed (m/s) applied to the X piezo to compensate the drift
+            Vy - float - the linear speed (m/s) applied to the Y piezo to compensate the drift
+            Vz - float - the linear speed (m/s) applied to the z piezo to compensate the drift
+            Xsat - bool - indicates if X drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
+            Ysat - bool - indicates if Y drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
+            Zsat - bool - indicates if Z drift correction has reached the limit (default is 10% of piezo range). If reached drift compensation stops for the axis.
+            SatLim - float - the drift saturation limit in percent of the full piezo range and it applies to all axes
+            Note, the saturation limit was added as a return argument in September 2022, this command will not work on older versions of Nanonis.
+        '''
+        parsedResponse = self.parse_response(self.send('Piezo.DriftCompGet'), 'uint32', 'float32', 'float32', 'float32', 'uint32', 'uint32', 'uint32', 'float32')
+        if parsedResponse['Error status']:
+            raise nanonisException('Error executing PiezoDriftCompGet')
+        else:
+            return {'Status': parsedResponse['0'], 'Vx': parsedResponse['1'], 'Vy': parsedResponse['2'], 'Vz': parsedResponse['3'], 'Xsat': bool(parsedResponse['4']), 'Ysat': bool(parsedResponse['5']), 'Zsat': bool(parsedResponse['6']), 'SatLim': bool(parsedResponse['7'])}
+        
+    def PiezoDriftCompSet(self, on, Vxyz, satLim=10):
+        r''' Set the drift compensation parameters applied to the piezos.
+            
+            Args:
+                 on : int - Activates or deactivates the drift compensation - (-1 = no change, 0 = off, 1 = on)
+                 Vxyz : [float, float, float] - list or 1D numpy array of the linear speeds (m/s) applied to the X, Y an Z piezos to compensate the drift
+                 satLim: float - the drift saturation limit in percent of the full piezo range and it applies to all axes - default 10%
+        '''
+        #Convert Vxyz values if input as strings
+        for Vn, i in enumerate(Vxyz):
+            if type(Vn) is str:
+                Vxyz[i] = self.convert(Vn)
+        
+        self.send('Piezo.DriftCompSet', 'int', on, 'float32', Vxyz[0], 'float32', Vxyz[1], 'float32', Vxyz[2], 'float32', satLim)
+        
+    def ZSpectrPropsGet(self):
+        r'''
+        Get the Z Spectroscopy parameters.
+        
+        Args:
+            None
+            
+        Returns a dictionary containing the following:
+            backwardSweep - int - indicates if backward sweep is performed (1 for yes, 0 for no)
+            numPoints - int - number of points to acquire over the sweep range
+            channels - list - names of the acquired channels in the sweep
+            parameters - list - parameters of the sweep
+            fixedParameters - list - fixed parameters of the sweep
+            numSweeps - int - number of sweeps to measure and average
+            saveAll - int - indicates if data from individual sweeps is saved along with the average data (1 for yes, 0 for no)
+            
+        Raises:
+            nanonisException - if there is an error executing the command
+        '''
+        parsedResponse = self.parse_response(self.send('ZSpectr.PropsGet'), 'uint16', 'int', 'string', 'string', 'string', 'uint16', 'uint16')
+        
+        # Check if an error has been returned
+        if parsedResponse['Error status']:
+            raise nanonisException('Error executing ZSpectrPropsGet')
+        else:
+            # Parse the channels, parameters, and fixed parameters arrays
+            channels = parsedResponse['2'].split('\n')
+            parameters = parsedResponse['3'].split('\n')
+            fixedParameters = parsedResponse['4'].split('\n')
+            
+            return {
+                'backwardSweep': parsedResponse['0'],
+                'numPoints': parsedResponse['1'],
+                'channels': channels,
+                'parameters': parameters,
+                'fixedParameters': fixedParameters,
+                'numSweeps': parsedResponse['5'],
+                'saveAll': parsedResponse['6']
+            }
+        
+    def SignalsNamesGet(self):
+        r'''
+        Get the list of channel names as a numpy array. Numpy array index corresponds to channel index in nanonis.
+
+        Returns
+        -------
+        numpy.1darray
+            Length 128 1D array containing the channel names. Index matches nanonis channel index.
+
+        '''
+        
+        parsedResponse = self.parse_response(self.send('Signals.NamesGet'), 'int', 'int', '1DArr_string')
+        return parsedResponse['2']
+        
+    
+    def SignalsValGet(self, signal, waitForNewest=True):
+        r'''
+        Get the value of a specified signal
+
+        Parameters
+        ----------
+        signal : int
+            Integer index of the signal. Channel indexes can be found by using the SignalsNamesGet function.
+        waitForNewest : Bool, optional
+            Selects whether the function returns the next available signal value or if it waits for a full 
+            period of new data. If False, this function returns a value 0 to Tap seconds after being called. 
+            If True, the function discard the first oversampled signal value received but returns the second 
+            value received. Thus, the function returns a value Tap to 2*Tap seconds after being called.
+            The default is True.
+
+        Returns
+        -------
+        Float containing the value of the signal in SI units.
+
+        '''
+        #Convert waitForNewest into an integer
+        if waitForNewest:
+            wait = 1
+        else:
+            wait = 0
+        parsedResponse = self.parse_response(self.send('Signals.ValGet', 'int', signal, 'uint32', wait), 'float32')
+        
+        return parsedResponse['0']
+            
